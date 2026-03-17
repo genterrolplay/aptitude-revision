@@ -13,15 +13,39 @@ let dailyChart = null;
 let categoryChart = null;
 
 // ========== API HELPERS ==========
-async function api(url, options = {}) {
-    const res = await fetch(url, {
-        headers: { 'Content-Type': 'application/json' },
-        ...options,
-        body: options.body ? JSON.stringify(options.body) : undefined
-    });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Erreur serveur');
-    return data;
+async function api(url, options = {}, retries = 2) {
+    for (let attempt = 0; attempt <= retries; attempt++) {
+        try {
+            const res = await fetch(url, {
+                headers: { 'Content-Type': 'application/json' },
+                ...options,
+                body: options.body ? JSON.stringify(options.body) : undefined
+            });
+            
+            // Handle session expiry
+            if (res.status === 401 && !url.includes('/login') && !url.includes('/me')) {
+                showToast('Session expirée, reconnexion...', 'error');
+                setTimeout(() => location.reload(), 1500);
+                throw new Error('Session expirée');
+            }
+            
+            let data;
+            try {
+                data = await res.json();
+            } catch {
+                throw new Error('Erreur de communication avec le serveur');
+            }
+            
+            if (!res.ok) throw new Error(data.error || 'Erreur serveur');
+            return data;
+        } catch (err) {
+            if (attempt < retries && !err.message.includes('Session expirée')) {
+                await new Promise(r => setTimeout(r, 500 * (attempt + 1)));
+                continue;
+            }
+            throw err;
+        }
+    }
 }
 
 function showToast(message, type = 'success') {
@@ -332,53 +356,65 @@ async function startExercise(category) {
 function updateTimer() {
     const elapsed = Math.floor((Date.now() - sessionStartTime) / 1000);
     const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
-    const secs = (elapsed % 60).toString().padStart(2, '0');
-    document.getElementById('exercise-timer').textContent = `⏱ ${mins}:${secs}`;
+    const secs = (elapsed % 60).toString().padStart    document.getElementById('exercise-timer').textContent = `⏱ ${mins}:${secs}`;
 }
 
 async function loadQuestion() {
-    try {
-        const url = currentCategory === 'mixed'
-            ? `/api/exercises/question?difficulty=${currentDifficulty}`
-            : `/api/exercises/question/${currentCategory}?difficulty=${currentDifficulty}`;
+    const maxRetries = 3;
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+        try {
+            const url = currentCategory === 'mixed'
+                ? `/api/exercises/question?difficulty=${currentDifficulty}`
+                : `/api/exercises/question/${currentCategory}?difficulty=${currentDifficulty}`;
 
-        currentQuestion = await api(url);
-        questionStartTime = Date.now();
+            currentQuestion = await api(url, {}, 1);
+            questionStartTime = Date.now();
 
-        // Update UI
-        sessionQuestions++;
-        document.getElementById('exercise-counter').textContent = `Question ${sessionQuestions}`;
-        document.getElementById('exercise-progress-bar').style.width = '0%';
-        document.getElementById('question-badge').textContent = `${getCategoryIcon(currentQuestion.category)} ${currentQuestion.categoryLabel}`;
-        document.getElementById('question-text').textContent = currentQuestion.question;
+            // Update UI
+            sessionQuestions++;
+            document.getElementById('exercise-counter').textContent = `Question ${sessionQuestions}`;
+            document.getElementById('exercise-progress-bar').style.width = '0%';
+            document.getElementById('question-badge').textContent = `${getCategoryIcon(currentQuestion.category)} ${currentQuestion.categoryLabel}`;
+            document.getElementById('question-text').textContent = currentQuestion.question;
 
-        // Reset state
-        document.getElementById('hint-content').classList.remove('visible');
-        document.getElementById('hint-content').textContent = currentQuestion.hint;
-        document.getElementById('result-feedback').classList.remove('visible', 'correct', 'incorrect');
-        document.getElementById('next-question-btn').classList.add('hidden');
-        document.getElementById('hint-btn').disabled = false;
+            // Reset state
+            document.getElementById('hint-content').classList.remove('visible');
+            document.getElementById('hint-content').textContent = currentQuestion.hint;
+            document.getElementById('result-feedback').classList.remove('visible', 'correct', 'incorrect');
+            document.getElementById('next-question-btn').classList.add('hidden');
+            document.getElementById('hint-btn').disabled = false;
 
-        if (currentQuestion.type === 'multiple_choice') {
-            document.getElementById('answer-typed').classList.add('hidden');
-            const choicesEl = document.getElementById('answer-choices');
-            choicesEl.classList.remove('hidden');
-            choicesEl.innerHTML = currentQuestion.options.map(opt => `
-                <button class="option-btn" onclick="selectOption(this, '${opt.replace(/'/g, "\\'")}')">${opt}</button>
-            `).join('');
-        } else {
-            document.getElementById('answer-choices').classList.add('hidden');
-            document.getElementById('answer-typed').classList.remove('hidden');
-            const input = document.getElementById('answer-input');
-            input.value = '';
-            input.className = 'answer-input';
-            input.disabled = false;
-            input.focus();
-            document.getElementById('submit-answer-btn').classList.remove('hidden');
+            if (currentQuestion.type === 'multiple_choice') {
+                document.getElementById('answer-typed').classList.add('hidden');
+                const choicesEl = document.getElementById('answer-choices');
+                choicesEl.classList.remove('hidden');
+                choicesEl.innerHTML = currentQuestion.options.map(opt => `
+                    <button class="option-btn" onclick="selectOption(this, '${opt.replace(/'/g, "\\'")}')">${opt}</button>
+                `).join('');
+            } else {
+                document.getElementById('answer-choices').classList.add('hidden');
+                document.getElementById('answer-typed').classList.remove('hidden');
+                const input = document.getElementById('answer-input');
+                input.value = '';
+                input.className = 'answer-input';
+                input.disabled = false;
+                input.focus();
+                document.getElementById('submit-answer-btn').classList.remove('hidden');
+            }
+            return; // Success, exit loop
+        } catch (err) {
+            console.error(`Question error (attempt ${attempt}/${maxRetries}):`, err);
+            if (attempt < maxRetries) {
+                await new Promise(r => setTimeout(r, 1000 * attempt));
+            } else {
+                showToast('Erreur de chargement — clique sur "Question suivante" pour réessayer', 'error');
+                document.getElementById('next-question-btn').classList.remove('hidden');
+                sessionQuestions--; // Don't count failed loads
+            }
         }
-    } catch (err) {
-        console.error('Question error:', err);
-        showToast('Erreur de chargement de la question', 'error');
+    }
+}   }
+};
     }
 }
 
