@@ -356,7 +356,8 @@ async function startExercise(category) {
 function updateTimer() {
     const elapsed = Math.floor((Date.now() - sessionStartTime) / 1000);
     const mins = Math.floor(elapsed / 60).toString().padStart(2, '0');
-    const secs = (elapsed % 60).toString().padStart    document.getElementById('exercise-timer').textContent = `⏱ ${mins}:${secs}`;
+    const secs = (elapsed % 60).toString().padStart(2, '0');
+    document.getElementById('exercise-timer').textContent = `⏱ ${mins}:${secs}`;
 }
 
 async function loadQuestion() {
@@ -401,7 +402,7 @@ async function loadQuestion() {
                 input.focus();
                 document.getElementById('submit-answer-btn').classList.remove('hidden');
             }
-            return; // Success, exit loop
+            return;
         } catch (err) {
             console.error(`Question error (attempt ${attempt}/${maxRetries}):`, err);
             if (attempt < maxRetries) {
@@ -409,12 +410,9 @@ async function loadQuestion() {
             } else {
                 showToast('Erreur de chargement — clique sur "Question suivante" pour réessayer', 'error');
                 document.getElementById('next-question-btn').classList.remove('hidden');
-                sessionQuestions--; // Don't count failed loads
+                sessionQuestions--;
             }
         }
-    }
-}   }
-};
     }
 }
 
